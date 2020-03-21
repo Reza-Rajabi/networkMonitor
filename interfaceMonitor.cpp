@@ -18,23 +18,19 @@
 #include <string>
 
 
-const int MAX_BUF = 255;
-const int MIN_BUF = 50;
+const int MAX_BUF = 50;
 const int NUM_STAT = 11;
-char netPath[MIN_BUF] = "/sys/class/net/"; /// interface name will be added here
-char socketPath[MIN_BUF] = "/tmp/interfaceMonitor/";
-char path[MIN_BUF], box[MIN_BUF];
+char netPath[MAX_BUF] = "/sys/class/net/"; /// interface name will be added here
+char socketPath[MAX_BUF] = "/tmp/interfaceMonitor/";
+char path[MAX_BUF], box[MAX_BUF];
 bool isRunning = true;
 int sockFd;
 
-enum exit_err_code { ERR_ARG = 1, ERR_SIG, ERR_SOCK, ERR_CONNECT,
-                     ERR_OPEN_DIR, ERR_FORK, ALERT };
-
+enum exit_code { ERR_ARG = 1, ERR_SIG, ERR_SOCK, ERR_CONNECT, ERR_OPEN_DIR, ALERT };
 enum state { UP = 1, DOWN = 0, UNKNOWN = -1 };
-
 struct stat {
-    char subPath[MIN_BUF];
-    char title[MIN_BUF];
+    char subPath[MAX_BUF];
+    char title[MAX_BUF];
     int val;
 };
 
@@ -55,10 +51,8 @@ stat STAT[] = {
 
 typedef void (*sighandler_t)(int);
 static void signalHandler(int signal);
-void handleError(std::string msg1, char* msg2, exit_err_code err = ALERT, int fd = -1);
+void handleError(std::string msg1, char* msg2, exit_code err = ALERT, int fd = -1);
 void talk(const char* toSay, char* answer);
-void loadStatistics(char* interfaceName, int* stats);
-void monitor(struct dirent dir, pid_t& pid);
 
 
 
@@ -87,7 +81,7 @@ int main(int argc, char *argv[]) {
     int status = connect(sockFd, (struct sockaddr*) &sockAddr, sizeof(sockAddr));
     if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
     
-    // inform server that interfaceMonitor is ready and read the instruction
+    // inform server the readiness and read the instruction
     talk("Ready", box);
     if (strcmp(box, "Monitor") != 0)
         handleError("didn't undrestand the instruction", NULL, ERR_CONNECT);
@@ -99,14 +93,14 @@ int main(int argc, char *argv[]) {
     std::cout << "Interface: " << argv[1] << " ";
     while (isRunning) {
         for (int i = 0; i < NUM_STAT; i++) {
-            bzero(path, MIN_BUF);
+            bzero(path, MAX_BUF);
             strcpy(path, netPath);
-            strcpy(path, STAT[i].subPath);
+            strcat(path, STAT[i].subPath);
             if (i > 2) strcat(path,STAT[i].title);
             ifs.open(path);
             if(ifs.is_open()) {
-                if (i == 0) {
-                    bzero(box, MIN_BUF);
+                if (i == 0) { /// this is `operstate` info
+                    bzero(box, MAX_BUF);
                     ifs >> box;
                     if (strcmp(box, "up") == 0) STAT[i].val = UP;
                     else if (strcmp(box, "down") == 0) STAT[i].val = DOWN;
@@ -128,8 +122,9 @@ int main(int argc, char *argv[]) {
                 bzero(&ifr, sizeof(ifr));
                 strncpy(ifr.ifr_name, argv[1], IFNAMSIZ);
                 ifr.ifr_ifru.ifru_flags |= IFF_UP;
-                status = ioctl(sockFd, SIOCSIFFLAGS, &ifr);
-                if (status == -1) strerror(errno);
+                int socketFd = socket(AF_INET, SOCK_DGRAM, 0);
+                status = ioctl(socketFd, SIOCSIFFLAGS, &ifr);
+                if (status == -1 || socketFd == -1) strerror(errno);
             }
         }
         
@@ -152,11 +147,11 @@ static void signalHandler(int signal) {
     }
 }
 
-void handleError(std::string msg1, char* msg2, exit_err_code err, int fd) {
+void handleError(std::string msg1, char* msg2, exit_code err, int fd) {
     std::cout << msg1;
     if(msg2) std::cout << msg2;
     std::cout << std::endl;
-    if (fd > 0) close(fd);
+    if (fd > 0) close(fd); /// fd has a default value of -1
     if (err != ALERT) {
         strerror(errno);
         exit(err);
@@ -168,8 +163,8 @@ void talk(const char* toSay, char* answer) {
     if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
     
     if (answer) { /// !NULL
-        bzero(answer, MIN_BUF);
-        status = read(sockFd, box, MIN_BUF);
+        bzero(answer, MAX_BUF);
+        status = read(sockFd, answer, MAX_BUF);
         if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
     }
 }
