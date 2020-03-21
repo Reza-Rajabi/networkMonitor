@@ -52,24 +52,24 @@ stat STAT[] = {
 
 typedef void (*sighandler_t)(int);
 static void signalHandler(int signal);
-void handleError(std::string msg1, char* msg2, exit_code err = ALERT, int fd = -1);
+void handleError(std::string msg, exit_code err = ALERT, int fd = -1);
 void talk(const char* toSay, char* answer);
 
 
 
 //------------------------------------- MAIN ------------------------------------------//
-int __main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     // check the path to the requested interface
-    if (argc != 2) handleError("Interface name not provided", NULL, ERR_ARG);
+    if (argc != 2) handleError("Interface name not provided", ERR_ARG);
     strcat(netPath, argv[1]);
     
     // register signal handler
     sighandler_t err = signal(SIGINT, signalHandler);
-    if (err == SIG_ERR) handleError("could not creat a signal handler", NULL, ERR_SIG);
+    if (err == SIG_ERR) handleError("could not creat a signal handler", ERR_SIG);
     
     // setup socket communication
     sockFd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sockFd == -1) handleError("error on creating socket", NULL, ERR_SOCK);
+    if (sockFd == -1) handleError("error on creating socket", ERR_SOCK);
     struct sockaddr_un sockAddr;
     bzero(&sockAddr, sizeof(sockAddr));
     sockAddr.sun_family = AF_UNIX;
@@ -77,13 +77,13 @@ int __main(int argc, char *argv[]) {
     strncpy(sockAddr.sun_path, socketPath, sizeof(sockAddr.sun_path) - 1);
     
     // connect to local socket
-    int status = connect(sockFd, (struct sockaddr*) &sockAddr, sizeof(sockAddr));
-    if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
+    ssize_t status = connect(sockFd, (struct sockaddr*) &sockAddr, sizeof(sockAddr));
+    if (status == -1) handleError("error on connection", ERR_CONNECT);
     
     // inform server the readiness and read the instruction
     talk("Ready", box);
     if (strcmp(box, "Monitor") != 0)
-        handleError("didn't undrestand the instruction", NULL, ERR_CONNECT);
+        handleError("didn't undrestand the instruction", ERR_CONNECT);
     else {
         /// MUST HAVE NON-BLOCKING READ FROM THIS POINT
         int flags = fcntl(sockFd, F_GETFL);
@@ -115,7 +115,7 @@ int __main(int argc, char *argv[]) {
                 std::cout << STAT[i].title << ": " << STAT[i].val << " ";
                 if (i == 2 || i == NUM_STAT) std::cout << std::endl;
             }
-            else handleError("\ncouldn't open a statistic file", NULL, ERR_OPEN_DIR);
+            else handleError("\ncouldn't open a statistic file", ERR_OPEN_DIR);
         }
         std::cout << std::endl;
         
@@ -152,10 +152,8 @@ static void signalHandler(int signal) {
     }
 }
 
-void handleError(std::string msg1, char* msg2, exit_code err, int fd) {
-    std::cout << msg1;
-    if(msg2) std::cout << msg2;
-    std::cout << std::endl;
+void handleError(std::string msg, exit_code err, int fd) {
+    std::cout << msg << std::endl;
     if (fd > 0) close(fd); /// fd has a default value of -1
     if (err != ALERT) {
         strerror(errno);
@@ -165,12 +163,12 @@ void handleError(std::string msg1, char* msg2, exit_code err, int fd) {
 
 void talk(const char* toSay, char* answer) {
     // write
-    int status = write(sockFd, toSay, strlen(toSay)+1);
-    if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
+    ssize_t status = write(sockFd, toSay, strlen(toSay)+1);
+    if (status == -1) handleError("error on connection", ERR_CONNECT);
     // read
     bzero(answer, MAX_BUF);
     status = read(sockFd, answer, MAX_BUF);
-    if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
+    if (status == -1) handleError("error on connection", ERR_CONNECT);
     // handle special case
     if (strcmp(answer, "Shut Down") == 0) {
         write(sockFd, "Done", 5); /// will not check for error or feedback
