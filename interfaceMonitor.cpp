@@ -21,7 +21,7 @@
 const int MAX_BUF = 50;
 const int NUM_STAT = 11;
 char netPath[MAX_BUF] = "/sys/class/net/"; /// interface name will be added here
-char socketPath[MAX_BUF] = "/tmp/interfaceMonitor/";
+char socketPath[MAX_BUF] = "/tmp/networkMonitor/";
 char path[MAX_BUF], box[MAX_BUF];
 bool isRunning = true;
 int sockFd;
@@ -57,7 +57,7 @@ void talk(const char* toSay, char* answer);
 
 
 //------------------------------------- MAIN ------------------------------------------//
-int main(int argc, char *argv[]) {
+int __main(int argc, char *argv[]) {
     // check the path to the requested interface
     if (argc != 2) handleError("Interface name not provided", NULL, ERR_ARG);
     strcat(netPath, argv[1]);
@@ -72,9 +72,7 @@ int main(int argc, char *argv[]) {
     struct sockaddr_un sockAddr;
     bzero(&sockAddr, sizeof(sockAddr));
     sockAddr.sun_family = AF_UNIX;
-    bzero(box, MAX_BUF);
-    sprintf(box,"%d", getpid());
-    strcat(socketPath,box);
+    strcat(socketPath,argv[1]);
     strncpy(sockAddr.sun_path, socketPath, sizeof(sockAddr.sun_path) - 1);
     
     // connect to local socket
