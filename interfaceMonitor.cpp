@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/ioctl.h>
+#include <fcntl.h>
 #include <net/if.h>
 #include <string>
 
@@ -83,7 +84,12 @@ int __main(int argc, char *argv[]) {
     talk("Ready", box);
     if (strcmp(box, "Monitor") != 0)
         handleError("didn't undrestand the instruction", NULL, ERR_CONNECT);
-    else talk("Monitoring", NULL);
+    else {
+        /// MUST HAVE NON-BLOCKING READ FROM THIS POINT
+        int flags = fcntl(sockFd, F_GETFL);
+        fcntl(sockFd, F_SETFL, flags | O_NONBLOCK);
+        talk("Monitoring", box);
+    }
     
     // open the /sys/class/net/<interface> directory and monitor stats
     std::ifstream ifs;
@@ -113,7 +119,7 @@ int __main(int argc, char *argv[]) {
         }
         std::cout << std::endl;
         
-        // check if interface down -> report -> set up if requested
+        // check if interface down -> report -> set network `up` if requested
         if (STAT[0].val == DOWN) {
             talk("Link Down", box);
             if (strcmp(box, "Set Link Up") == 0) {
@@ -137,6 +143,7 @@ int __main(int argc, char *argv[]) {
 static void signalHandler(int signal) {
     switch(signal) {
         case SIGINT:
+            write(sockFd, "Done", 5); /// will not check for error or feedback
             isRunning = false;
             close(sockFd);
         break;
@@ -157,12 +164,16 @@ void handleError(std::string msg1, char* msg2, exit_code err, int fd) {
 }
 
 void talk(const char* toSay, char* answer) {
+    // write
     int status = write(sockFd, toSay, strlen(toSay)+1);
     if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
-    
-    if (answer) { /// !NULL
-        bzero(answer, MAX_BUF);
-        status = read(sockFd, answer, MAX_BUF);
-        if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
+    // read
+    bzero(answer, MAX_BUF);
+    status = read(sockFd, answer, MAX_BUF);
+    if (status == -1) handleError("error on connection", NULL, ERR_CONNECT);
+    // handle special case
+    if (strcmp(answer, "Shut Down") == 0) {
+        write(sockFd, "Done", 5); /// will not check for error or feedback
+        isRunning = false;
     }
 }
