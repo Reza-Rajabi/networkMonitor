@@ -26,7 +26,7 @@ int num_intface;
 int masterFd, clientFDs[MAX_CLIENT];
 fd_set activeFDs, readFDs;
 
-enum exit_code { ERR_ARG = 1, ERR_SIG, ERR_SOCK, ERR_CONNECT, ERR_OPEN_DIR, ALERT };
+enum exit_code { DONE, ERR_ARG, ERR_SIG, ERR_SOCK, ERR_CONNECT, ERR_OPEN_DIR, ALERT };
 
 
 typedef void (*sighandler_t)(int);
@@ -46,13 +46,16 @@ int main(int argc, char *argv[]) {
     char buf[MAX_BUF];
     std::vector<std::string> interfaces;
     ssize_t status = -1;
-    while (status == -1) {
-        std::cout << "Enter the number and the name of the interfaces to be monitored: ";
+    while (status == -1 && isRunning) {
+        /// isRunning here makes this part managable by SIGINT, if happens before user entry
+        std::cout << "Enter the number and the names of the interfaces, space separated: ";
+        /// example of user input: 4 eth0  ip6tnl0  lo  tunl0
         bzero(buf, MAX_BUF);
         status = scanf("%s",buf);
         num_intface = atoi(buf);
         if (num_intface == 0 || status <= 0) { /// either is zero or user didn't enter an integer
             handleError1("Please also specify the number of interfaces");
+            handleError1("example: 4 eth0  ip6tnl0  lo  tunl0");
             status = -1;
         }
         else {
@@ -132,7 +135,7 @@ int main(int argc, char *argv[]) {
                     bzero(buf, MAX_BUF);
                     status = read(clientFDs[i], buf, MAX_BUF);
                     if (status == -1) handleError2("couldn't read from interface", interfaces[i]);
-                    else {  /// folow the protocol
+                    else {  /// follow the protocol
                         if (strcmp(buf, "Ready") == 0) {
                             status = write(clientFDs[i], "Monitor", 8);
                             if (status == -1) handleError2("couldn't instruct to interface", interfaces[i]);
@@ -152,10 +155,14 @@ int main(int argc, char *argv[]) {
     } /// end of isRunning
     
 
-    return 0;
+    return DONE;
 }
 
 
+/* takes a interuption signal and respond to it by closing and
+  cleaning up the resources and informing the slaves clients
+  in case the program has been intrupted by ctrl-c
+*/
 static void signalHandler(int signal) {
     switch(signal) {
         case SIGINT:
@@ -173,19 +180,29 @@ static void signalHandler(int signal) {
     }
 }
 
+/* takes a message, an optional error code and an optional file descriptor
+   and handle the error by proper printing the message and potentionaly the
+   standard system error message. It may also close the socket and exit if
+   the error was not only an alert to the user
+*/
 void handleError1(std::string msg, exit_code err, int fd) {
-    std::cout << msg << std::endl;
-    if (fd > 0) close(fd); /// fd has a default value of -1
-    if (err != ALERT) {
-        strerror(errno);
-        exit(err);
-        /// non of the scenarios that call this function needs to close `interfaceMonitor`
-        /// because either the `interfaceMonitor` process has not been created yet, or
-        /// the error is not general and does not try to make `networkMonitor` to exit
+    if (isRunning) { /// isRunning flag prevents unnecessary error handling while signal handler is shutting down
+        std::cout << msg << std::endl;
+        if (fd > 0) close(fd); /// fd has a default value of -1
+        if (err != ALERT) {
+            strerror(errno);
+            exit(err);
+            /// non of the scenarios that call this function needs to close `interfaceMonitor`
+            /// because either the `interfaceMonitor` process has not been created yet, or
+            /// the error is not general and does not try to make `networkMonitor` to exit
+        }
     }
 }
 
+// simply concatinate two messages and call the handleError1
 void handleError2(std::string msg1, std::string msg2, exit_code err, int fd) {
-    std::string msg = msg1 + " " + msg2;
-    handleError1(msg, err, fd);
+    if (isRunning) { /// isRunning flag prevents unnecessary error handling while signal handler is shutting down
+        std::string msg = msg1 + " " + msg2;
+        handleError1(msg, err, fd);
+    }
 }

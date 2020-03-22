@@ -21,17 +21,17 @@
 
 const int MAX_BUF = 50;
 const int NUM_STAT = 11;
+const int INTERVAL = 1;
 char netPath[MAX_BUF] = "/sys/class/net/"; /// interface name will be added here
 char socketPath[MAX_BUF] = "/tmp/networkMonitor";
-char path[MAX_BUF], box[MAX_BUF];
 bool isRunning = true;
 int sockFd;
 
-enum exit_code { ERR_ARG = 1, ERR_SIG, ERR_SOCK, ERR_CONNECT, ERR_OPEN_DIR, ALERT };
+enum exit_code { DONE, ERR_ARG, ERR_SIG, ERR_SOCK, ERR_CONNECT, ERR_OPEN_DIR, ALERT };
 enum state { UP = 1, DOWN = 0, UNKNOWN = -1 };
 struct stats {
     char subPath[MAX_BUF];
-    char title[MAX_BUF];
+    char title[MAX_BUF/2];
     int val;
 };
 
@@ -39,21 +39,20 @@ stats STAT[] = {
     {"/operstate"         , "state"     , 0}, /// will map an int to `up` , `down` , and `unknown` state
     {"/carrier_up_count"  , "up_count"  , 0},
     {"/carrier_down_count", "down_count", 0},
-    {"/statistics/"       , "tx_bytes"  , 0},
-    {"/statistics/"       , "tx_packets", 0},
-    {"/statistics/"       , "tx_dropped", 0},
-    {"/statistics/"       , "tx_errors" , 0},
     {"/statistics/"       , "rx_bytes"  , 0},
-    {"/statistics/"       , "rx_packets", 0},
     {"/statistics/"       , "rx_dropped", 0},
     {"/statistics/"       , "rx_errors" , 0},
+    {"/statistics/"       , "rx_packets", 0},
+    {"/statistics/"       , "tx_bytes"  , 0},
+    {"/statistics/"       , "tx_dropped", 0},
+    {"/statistics/"       , "tx_errors" , 0},
+    {"/statistics/"       , "tx_packets", 0}
 };
 
 
 typedef void (*sighandler_t)(int);
 static void signalHandler(int signal);
 void handleError(std::string msg, exit_code err = ALERT, int fd = -1);
-void talk(const char* toSay, char* answer);
 
 
 
@@ -77,68 +76,104 @@ int main(int argc, char *argv[]) {
     
     // connect to local socket
     ssize_t status = connect(sockFd, (struct sockaddr*) &sockAddr, sizeof(sockAddr));
-    if (status == -1) handleError("error on connection", ERR_CONNECT);
+    if (status == -1) handleError("error on connection", ERR_CONNECT, sockFd);
     
     // inform server the readiness and read the instruction
-    talk("Ready", box);
-    if (strcmp(box, "Monitor") != 0)
-        handleError("didn't undrestand the instruction", ERR_CONNECT);
+    char buf[MAX_BUF];
+    status = write(sockFd, "Ready", 6);
+    if (status == -1) handleError("error on connection", ERR_CONNECT, sockFd);
+    bzero(buf, MAX_BUF);
+    status = read(sockFd, buf, MAX_BUF);
+    if (status == -1) handleError("error on connection", ERR_CONNECT, sockFd);
+    if (strcmp(buf, "Monitor") != 0)
+        handleError("didn't undrestand the instruction", ERR_CONNECT, sockFd);
     else {
-        /// MUST HAVE NON-BLOCKING READ FROM THIS POINT
-        int flags = fcntl(sockFd, F_GETFL);
-        fcntl(sockFd, F_SETFL, flags | O_NONBLOCK);
-        talk("Monitoring", box);
+        ssize_t status = write(sockFd, "Monitoring", 11);
+        if (status == -1) handleError("error on connection", ERR_CONNECT, sockFd);
     }
+    
+    // MUST HAVE NON-BLOCKING READ AFTER THIS POINT to get `Shout Down` at any time
+    /// setup for non-blocking read using select()
+    fd_set coming;
+    FD_ZERO(&coming);
+    FD_SET(sockFd, &coming);
     
     // open the /sys/class/net/<interface> directory and monitor stats
     std::ifstream ifs;
     struct ifreq ifr;
-    std::cout << "Interface: " << argv[1] << " ";
-    while (isRunning) {
-        for (int i = 0; i < NUM_STAT; i++) {
-            bzero(path, MAX_BUF);
-            strcpy(path, netPath);
-            strcat(path, STAT[i].subPath);
-            if (i > 2) strcat(path,STAT[i].title);
-            ifs.open(path);
-            if(ifs.is_open()) {
-                if (i == 0) { /// this is `operstate` info
-                    bzero(box, MAX_BUF);
-                    ifs >> box;
-                    if (strcmp(box, "up") == 0) STAT[i].val = UP;
-                    else if (strcmp(box, "down") == 0) STAT[i].val = DOWN;
-                    else STAT[i].val = UNKNOWN;
+    while (isRunning) { /// to handle the non-blocking read
+        while (isRunning) { /// to handle the report per time interval
+            // report
+            std::cout << "Interface: " << argv[1] << " ";
+            for (int i = 0; i < NUM_STAT; i++) {
+                bzero(buf, MAX_BUF);
+                strcpy(buf, netPath);
+                strcat(buf, STAT[i].subPath);
+                if (i > 2) strcat(buf,STAT[i].title);
+                ifs.open(buf);
+                if(ifs.is_open()) {
+                    if (i == 0) { /// this is `operstate` info
+                        bzero(buf, MAX_BUF);
+                        ifs >> buf;
+                        if (strcmp(buf, "up") == 0) STAT[i].val = UP;
+                        else if (strcmp(buf, "down") == 0) STAT[i].val = DOWN;
+                        else STAT[i].val = UNKNOWN;
+                    }
+                    else ifs >> STAT[i].val;
+                    ifs.close();
+                    std::cout << STAT[i].title << ": ";
+                    if (i == 0) { /// this is `operstate` info
+                        if (STAT[i].val == UP) std::cout << "up ";
+                        else if (STAT[i].val == DOWN) std::cout << "down ";
+                        else std::cout << "unknown ";
+                    }
+                    else std::cout << STAT[i].val << " ";
                 }
-                else ifs >> STAT[i].val;
-                ifs.close();
-                std::cout << STAT[i].title << ": " << STAT[i].val << " ";
-                if (i == 2 || i == NUM_STAT) std::cout << std::endl;
+                else std::cout << STAT[i].title << " "; // "couldn't open " <<
+                if (i == NUM_STAT-1) std::cout << std::endl << std::endl;
             }
-            else handleError("\ncouldn't open a statistic file", ERR_OPEN_DIR);
-        }
-        std::cout << std::endl;
-        
-        // check if interface down -> report -> set network `up` if requested
-        if (STAT[0].val == DOWN) {
-            talk("Link Down", box);
-            if (strcmp(box, "Set Link Up") == 0) {
-                bzero(&ifr, sizeof(ifr));
-                strncpy(ifr.ifr_name, argv[1], IFNAMSIZ);
-                ifr.ifr_ifru.ifru_flags |= IFF_UP;
-                int socketFd = socket(AF_INET, SOCK_DGRAM, 0);
-                status = ioctl(socketFd, SIOCSIFFLAGS, &ifr);
-                if (status == -1 || socketFd == -1) strerror(errno);
+            
+            // check if interface down
+            if (STAT[0].val == DOWN) {
+                status = write(sockFd, "Link Down", 10);
+                if (status == -1) handleError("error on connection", ERR_CONNECT, sockFd);
             }
+            
+            
+            sleep(INTERVAL);
         }
         
-        sleep(1);
+        
+        ///---------------------------------------------- IN THE OUTER LOOP --------------------------------------///
+        
+        // using select to have a non-blocking read
+        status = select(sockFd+1, &coming, NULL, NULL, NULL);
+        if (status == -1 || !FD_ISSET(sockFd, &coming))
+            bzero(buf, MAX_BUF);
+        read(sockFd, buf, MAX_BUF); /// non-blocking read
+        
+        // respond
+        if ( strcmp(buf, "Shut Down") == 0 ) signalHandler(SIGINT);
+        if (strcmp(buf, "Set Link Up") == 0) {
+            bzero(&ifr, sizeof(ifr));
+            strncpy(ifr.ifr_name, argv[1], IFNAMSIZ);
+            ifr.ifr_ifru.ifru_flags |= IFF_UP;
+            int socketFd = socket(AF_INET, SOCK_DGRAM, 0);
+            status = ioctl(socketFd, SIOCSIFFLAGS, &ifr);
+            if (status == -1 || socketFd == -1) strerror(errno);
+        }
     }
 
     
-    return 0;
+    return DONE;
 }
 
 
+/* takes a interuption signal and respond to it by closing and
+   cleaning up the resources and informing the master server
+   in case the program has been intrupted by ctrl-c or recieved
+   a shut down message from the server
+ */
 static void signalHandler(int signal) {
     switch(signal) {
         case SIGINT:
@@ -151,26 +186,18 @@ static void signalHandler(int signal) {
     }
 }
 
+/* takes a message, an optional error code and an optional file descriptor
+   and handle the error by proper printing the message and potentionaly the
+   standard system error message. It may also close the socket and exit if
+   the error error was not only an alert to the user
+*/
 void handleError(std::string msg, exit_code err, int fd) {
-    std::cout << msg << std::endl;
-    if (fd > 0) close(fd); /// fd has a default value of -1
-    if (err != ALERT) {
-        strerror(errno);
-        exit(err);
-    }
-}
-
-void talk(const char* toSay, char* answer) {
-    // write
-    ssize_t status = write(sockFd, toSay, strlen(toSay)+1);
-    if (status == -1) handleError("error on connection", ERR_CONNECT);
-    // read
-    bzero(answer, MAX_BUF);
-    status = read(sockFd, answer, MAX_BUF);
-    if (status == -1) handleError("error on connection", ERR_CONNECT);
-    // handle special case
-    if (strcmp(answer, "Shut Down") == 0) {
-        write(sockFd, "Done", 5); /// will not check for error or feedback
-        isRunning = false;
+    if (isRunning) { /// isRunning flag prevents unnecessary error handling while signal handler is shutting down
+        std::cout << msg << std::endl;
+        if (fd > 0) close(fd); /// fd has a default value of -1
+        if (err != ALERT) {
+            strerror(errno);
+            exit(err);
+        }
     }
 }
