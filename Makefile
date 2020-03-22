@@ -4,13 +4,13 @@ CFLAGS+=-Wall
 FILE1=networkMonitor.cpp
 FILE2=interfaceMonitor.cpp
 
-netMonitor: $(FILE1)
+networkMonitor: $(FILE1)
 	$(CC) $(CFLAGS) $^ -o $@
 
 intfMonitor: $(FILE2)
 	$(CC) $(CFLAGS) $^ -o $@
 
 clean:
-	rm -f *.o netMonitor intfMonitor
+	rm -f *.o networkMonitor intfMonitor
 
-all: netMonitor
+all: networkMonitor intfMonitor

@@ -22,20 +22,20 @@
 const int MAX_BUF = 50;
 const int NUM_STAT = 11;
 char netPath[MAX_BUF] = "/sys/class/net/"; /// interface name will be added here
-char socketPath[MAX_BUF] = "/tmp/networkMonitor/";
+char socketPath[MAX_BUF] = "/tmp/networkMonitor";
 char path[MAX_BUF], box[MAX_BUF];
 bool isRunning = true;
 int sockFd;
 
 enum exit_code { ERR_ARG = 1, ERR_SIG, ERR_SOCK, ERR_CONNECT, ERR_OPEN_DIR, ALERT };
 enum state { UP = 1, DOWN = 0, UNKNOWN = -1 };
-struct stat {
+struct stats {
     char subPath[MAX_BUF];
     char title[MAX_BUF];
     int val;
 };
 
-stat STAT[] = {
+stats STAT[] = {
     {"/operstate"         , "state"     , 0}, /// will map an int to `up` , `down` , and `unknown` state
     {"/carrier_up_count"  , "up_count"  , 0},
     {"/carrier_down_count", "down_count", 0},
@@ -58,7 +58,7 @@ void talk(const char* toSay, char* answer);
 
 
 //------------------------------------- MAIN ------------------------------------------//
-int __main(int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
     // check the path to the requested interface
     if (argc != 2) handleError("Interface name not provided", ERR_ARG);
     strcat(netPath, argv[1]);

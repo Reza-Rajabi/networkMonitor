@@ -19,11 +19,12 @@
 
 const int MAX_BUF = 50;
 const int MAX_CLIENT = 10;
-char socketPath[MAX_BUF] = "/tmp/networkMonitor/";
+char socketPath[MAX_BUF] = "/tmp/networkMonitor";
 const char interfaceMonitor[MAX_BUF] = "./intfMonitor";
 bool isRunning = true;
 int num_intface;
 int masterFd, clientFDs[MAX_CLIENT];
+fd_set activeFDs, readFDs;
 
 enum exit_code { ERR_ARG = 1, ERR_SIG, ERR_SOCK, ERR_CONNECT, ERR_OPEN_DIR, ALERT };
 
@@ -48,25 +49,26 @@ int main(int argc, char *argv[]) {
     while (status == -1) {
         std::cout << "Enter the number and the name of the interfaces to be monitored: ";
         bzero(buf, MAX_BUF);
-        std::cin >> buf;
+        status = scanf("%s",buf);
         num_intface = atoi(buf);
-        if (num_intface == 0) { /// either is zero or user didn't enter an int
+        if (num_intface == 0 || status <= 0) { /// either is zero or user didn't enter an integer
             handleError1("Please also specify the number of interfaces");
             status = -1;
         }
         else {
-            bzero(buf, MAX_BUF);
-            status = read(STDIN_FILENO, buf, MAX_BUF); /// already took the int
-            if (status == -1) handleError1("Please try again");
+            while(interfaces.size() < num_intface && status > 0) {
+                bzero(buf, MAX_BUF);
+                status = scanf("%s",buf);
+                interfaces.push_back(buf);
+            }
+            status = 0;
         }
     }
-    while(interfaces.size() < num_intface) interfaces.push_back(strtok(buf, " "));
     
     // setup socket communication
     num_intface = num_intface > MAX_CLIENT ? MAX_CLIENT : num_intface;
     int newSocketFd, maxFd;
     int clientCounter = 0;
-    fd_set activeFDs, readFDs;
     FD_ZERO(&activeFDs);
     FD_ZERO(&readFDs);
     /// create master socket
@@ -77,6 +79,7 @@ int main(int argc, char *argv[]) {
     bzero(&serverAddr, sizeof(serverAddr));
     serverAddr.sun_family = AF_UNIX;
     strncpy(serverAddr.sun_path, socketPath, sizeof(serverAddr.sun_path) - 1);
+    unlink(socketPath);
     
     // bind the socket to the local socket file
     status = bind(masterFd, (struct sockaddr*)&serverAddr, sizeof(serverAddr));
@@ -139,6 +142,7 @@ int main(int argc, char *argv[]) {
                             if (status == -1) handleError2("couldn't instruct to interface", interfaces[i]);
                         }
                         else if (strcmp(buf, "Done") == 0) {
+                            FD_CLR(clientFDs[i], &readFDs);
                             close(clientFDs[i]);
                         }
                     } /// end of protocol
@@ -158,8 +162,10 @@ static void signalHandler(int signal) {
             isRunning = false;
             for (int i = 0; i < num_intface; i++) {
                 write(clientFDs[i], "Shut Down", 10);
+                FD_CLR(clientFDs[i], &readFDs);
                 close(clientFDs[i]);
             }
+            unlink(socketPath);
             close(masterFd);
         break;
     default:
