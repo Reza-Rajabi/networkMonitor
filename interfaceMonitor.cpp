@@ -58,7 +58,7 @@ void talk(const char* toSay, char* answer);
 
 
 //------------------------------------- MAIN ------------------------------------------//
-int main(int argc, char *argv[]) {
+int __main(int argc, char *argv[]) {
     // check the path to the requested interface
     if (argc != 2) handleError("Interface name not provided", ERR_ARG);
     strcat(netPath, argv[1]);
@@ -73,7 +73,6 @@ int main(int argc, char *argv[]) {
     struct sockaddr_un sockAddr;
     bzero(&sockAddr, sizeof(sockAddr));
     sockAddr.sun_family = AF_UNIX;
-    strcat(socketPath,argv[1]);
     strncpy(sockAddr.sun_path, socketPath, sizeof(sockAddr.sun_path) - 1);
     
     // connect to local socket
